@@ -192,11 +192,12 @@ impl RakutenwRestClient {
 
     // ========== Order Operations (Python) ==========
 
-    #[pyo3(signature = (symbol_id, order_behavior, order_side, order_type, amount, price=None, leverage=None, close_behavior=None, post_only=None, ifd_close_limit_price=None, ifd_close_stop_price=None))]
+    #[pyo3(signature = (symbol_id, order_pattern, order_behavior, order_side, order_type, amount, price=None, leverage=None, close_behavior=None, post_only=None, order_expire=None, position_id=None, ifd_close_limit_price=None, ifd_close_stop_price=None, oco_order_type_1=None, oco_price_1=None, oco_order_type_2=None, oco_price_2=None))]
     pub fn post_order_py<'py>(
         &self,
         py: Python<'py>,
         symbol_id: String,
+        order_pattern: String,
         order_behavior: String,
         order_side: String,
         order_type: String,
@@ -205,52 +206,49 @@ impl RakutenwRestClient {
         leverage: Option<String>,
         close_behavior: Option<String>,
         post_only: Option<bool>,
+        order_expire: Option<String>,
+        position_id: Option<String>,
         ifd_close_limit_price: Option<String>,
         ifd_close_stop_price: Option<String>,
+        oco_order_type_1: Option<String>,
+        oco_price_1: Option<String>,
+        oco_order_type_2: Option<String>,
+        oco_price_2: Option<String>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.clone();
         let future = async move {
-            let mut body = serde_json::json!({
-                "symbolId": symbol_id,
-                "orderBehavior": order_behavior,
-                "orderSide": order_side,
-                "orderType": order_type,
-                "amount": amount,
-            });
-            if let Some(p) = price { body["price"] = serde_json::json!(p); }
-            if let Some(l) = leverage { body["leverage"] = serde_json::json!(l); }
-            if let Some(cb) = close_behavior { body["closeBehavior"] = serde_json::json!(cb); }
-            if let Some(po) = post_only { body["postOnly"] = serde_json::json!(po); }
-            if let Some(lp) = ifd_close_limit_price { body["ifdCloseLimitPrice"] = serde_json::json!(lp); }
-            if let Some(sp) = ifd_close_stop_price { body["ifdCloseStopPrice"] = serde_json::json!(sp); }
-
-            let body_str = body.to_string();
-            let res: serde_json::Value = client.private_post("/api/v1/cfd/order", &body_str).await.map_err(PyErr::from)?;
+            let res = client.submit_order(
+                &symbol_id, &order_pattern, &order_behavior, &order_side, &order_type, &amount,
+                price.as_deref(), leverage.as_deref(), close_behavior.as_deref(), post_only,
+                order_expire.as_deref(), position_id.as_deref(),
+                ifd_close_limit_price.as_deref(), ifd_close_stop_price.as_deref(),
+                oco_order_type_1.as_deref(), oco_price_1.as_deref(),
+                oco_order_type_2.as_deref(), oco_price_2.as_deref(),
+            ).await.map_err(PyErr::from)?;
             serde_json::to_string(&res).map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))
         };
         pyo3_async_runtimes::tokio::future_into_py(py, future)
     }
 
-    #[pyo3(signature = (id, price=None, amount=None, ifd_close_limit_price=None, ifd_close_stop_price=None))]
+    #[pyo3(signature = (symbol_id, order_pattern, order_id, order_type, price, amount, ifd_close_limit_price=None, ifd_close_stop_price=None))]
     pub fn put_order_py<'py>(
         &self,
         py: Python<'py>,
-        id: String,
-        price: Option<String>,
-        amount: Option<String>,
+        symbol_id: String,
+        order_pattern: String,
+        order_id: String,
+        order_type: String,
+        price: String,
+        amount: String,
         ifd_close_limit_price: Option<String>,
         ifd_close_stop_price: Option<String>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.clone();
         let future = async move {
-            let mut body = serde_json::json!({"id": id});
-            if let Some(p) = price { body["price"] = serde_json::json!(p); }
-            if let Some(a) = amount { body["amount"] = serde_json::json!(a); }
-            if let Some(lp) = ifd_close_limit_price { body["ifdCloseLimitPrice"] = serde_json::json!(lp); }
-            if let Some(sp) = ifd_close_stop_price { body["ifdCloseStopPrice"] = serde_json::json!(sp); }
-
-            let body_str = body.to_string();
-            let res: serde_json::Value = client.private_put("/api/v1/cfd/order", &body_str).await.map_err(PyErr::from)?;
+            let res = client.modify_order(
+                &symbol_id, &order_pattern, &order_id, &order_type, &price, &amount,
+                ifd_close_limit_price.as_deref(), ifd_close_stop_price.as_deref(),
+            ).await.map_err(PyErr::from)?;
             serde_json::to_string(&res).map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))
         };
         pyo3_async_runtimes::tokio::future_into_py(py, future)
@@ -268,7 +266,7 @@ impl RakutenwRestClient {
 
     // ========== Trade / Position API (Python) ==========
 
-    #[pyo3(signature = (symbol_id=None, ids=None, date_from=None, date_to=None, order_side=None, size=None))]
+    #[pyo3(signature = (symbol_id=None, ids=None, date_from=None, date_to=None, order_behavior=None, trade_behavior=None, order_side=None, order_pattern=None, order_type=None, trade_action=None, order_ids=None, position_ids=None, size=None))]
     pub fn get_trades_private_py<'py>(
         &self,
         py: Python<'py>,
@@ -276,7 +274,14 @@ impl RakutenwRestClient {
         ids: Option<Vec<String>>,
         date_from: Option<String>,
         date_to: Option<String>,
+        order_behavior: Option<String>,
+        trade_behavior: Option<String>,
         order_side: Option<String>,
+        order_pattern: Option<Vec<String>>,
+        order_type: Option<Vec<String>>,
+        trade_action: Option<String>,
+        order_ids: Option<Vec<String>>,
+        position_ids: Option<Vec<String>>,
         size: Option<i32>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.clone();
@@ -288,7 +293,22 @@ impl RakutenwRestClient {
             }
             if let Some(df) = date_from { query_owned.push(("dateFrom".to_string(), df)); }
             if let Some(dt) = date_to { query_owned.push(("dateTo".to_string(), dt)); }
+            if let Some(ob) = order_behavior { query_owned.push(("orderBehavior".to_string(), ob)); }
+            if let Some(tb) = trade_behavior { query_owned.push(("tradeBehavior".to_string(), tb)); }
             if let Some(os) = order_side { query_owned.push(("orderSide".to_string(), os)); }
+            if let Some(ops) = order_pattern {
+                for op in ops { query_owned.push(("orderPattern[]".to_string(), op)); }
+            }
+            if let Some(ots) = order_type {
+                for ot in ots { query_owned.push(("orderType[]".to_string(), ot)); }
+            }
+            if let Some(ta) = trade_action { query_owned.push(("tradeAction".to_string(), ta)); }
+            if let Some(oids) = order_ids {
+                for oid in oids { query_owned.push(("orderId[]".to_string(), oid)); }
+            }
+            if let Some(pids) = position_ids {
+                for pid in pids { query_owned.push(("positionId[]".to_string(), pid)); }
+            }
             if let Some(sz) = size { query_owned.push(("size".to_string(), sz.to_string())); }
 
             let query: Vec<(&str, &str)> = query_owned.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
@@ -535,9 +555,15 @@ impl RakutenwRestClient {
 
     // ========== Internal Rust methods for execution_client ==========
 
+    /// Submit a new order.
+    ///
+    /// `order_pattern`: "NORMAL", "OCO", "IFD", "IFD_OCO"
+    /// For NORMAL/IFD/IFD_OCO, orderData is used.
+    /// For OCO, ocoOrderData is used.
     pub async fn submit_order(
         &self,
         symbol_id: &str,
+        order_pattern: &str,
         order_behavior: &str,
         order_side: &str,
         order_type: &str,
@@ -546,32 +572,84 @@ impl RakutenwRestClient {
         leverage: Option<&str>,
         close_behavior: Option<&str>,
         post_only: Option<bool>,
+        order_expire: Option<&str>,
+        position_id: Option<&str>,
+        ifd_close_limit_price: Option<&str>,
+        ifd_close_stop_price: Option<&str>,
+        // OCO-specific fields
+        oco_order_type_1: Option<&str>,
+        oco_price_1: Option<&str>,
+        oco_order_type_2: Option<&str>,
+        oco_price_2: Option<&str>,
     ) -> Result<serde_json::Value, RakutenwError> {
         let mut body = serde_json::json!({
             "symbolId": symbol_id,
-            "orderBehavior": order_behavior,
-            "orderSide": order_side,
-            "orderType": order_type,
-            "amount": amount,
+            "orderPattern": order_pattern,
         });
-        if let Some(p) = price { body["price"] = serde_json::json!(p); }
-        if let Some(l) = leverage { body["leverage"] = serde_json::json!(l); }
-        if let Some(cb) = close_behavior { body["closeBehavior"] = serde_json::json!(cb); }
-        if let Some(po) = post_only { body["postOnly"] = serde_json::json!(po); }
+
+        if order_pattern == "OCO" {
+            // OCO pattern uses ocoOrderData with two legs
+            let mut oco_data = serde_json::json!({
+                "orderBehavior": order_behavior,
+                "orderSide": order_side,
+                "amount": amount,
+            });
+            if let Some(pid) = position_id { oco_data["positionId"] = serde_json::json!(pid); }
+            if let Some(l) = leverage { oco_data["leverage"] = serde_json::json!(l); }
+            if let Some(cb) = close_behavior { oco_data["closeBehavior"] = serde_json::json!(cb); }
+            if let Some(exp) = order_expire { oco_data["orderExpire"] = serde_json::json!(exp); }
+            if let Some(ot1) = oco_order_type_1 { oco_data["orderType1"] = serde_json::json!(ot1); }
+            if let Some(p1) = oco_price_1 { oco_data["price1"] = serde_json::json!(p1); }
+            if let Some(ot2) = oco_order_type_2 { oco_data["orderType2"] = serde_json::json!(ot2); }
+            if let Some(p2) = oco_price_2 { oco_data["price2"] = serde_json::json!(p2); }
+            body["ocoOrderData"] = oco_data;
+        } else {
+            // NORMAL / IFD / IFD_OCO use orderData
+            let mut order_data = serde_json::json!({
+                "orderBehavior": order_behavior,
+                "orderSide": order_side,
+                "orderType": order_type,
+                "amount": amount,
+            });
+            if let Some(p) = price { order_data["price"] = serde_json::json!(p); }
+            if let Some(l) = leverage { order_data["leverage"] = serde_json::json!(l); }
+            if let Some(cb) = close_behavior { order_data["closeBehavior"] = serde_json::json!(cb); }
+            if let Some(po) = post_only { order_data["postOnly"] = serde_json::json!(po); }
+            if let Some(exp) = order_expire { order_data["orderExpire"] = serde_json::json!(exp); }
+            if let Some(pid) = position_id { order_data["positionId"] = serde_json::json!(pid); }
+            if let Some(lp) = ifd_close_limit_price { order_data["ifdCloseLimitPrice"] = serde_json::json!(lp); }
+            if let Some(sp) = ifd_close_stop_price { order_data["ifdCloseStopPrice"] = serde_json::json!(sp); }
+            body["orderData"] = order_data;
+        }
 
         let body_str = body.to_string();
         self.private_post("/api/v1/cfd/order", &body_str).await
     }
 
+    /// Modify an existing order.
+    ///
+    /// All of `symbol_id`, `order_pattern`, `order_type`, `price`, `amount` are required by the API.
     pub async fn modify_order(
         &self,
-        id: &str,
-        price: Option<&str>,
-        amount: Option<&str>,
+        symbol_id: &str,
+        order_pattern: &str,
+        order_id: &str,
+        order_type: &str,
+        price: &str,
+        amount: &str,
+        ifd_close_limit_price: Option<&str>,
+        ifd_close_stop_price: Option<&str>,
     ) -> Result<serde_json::Value, RakutenwError> {
-        let mut body = serde_json::json!({"id": id});
-        if let Some(p) = price { body["price"] = serde_json::json!(p); }
-        if let Some(a) = amount { body["amount"] = serde_json::json!(a); }
+        let mut body = serde_json::json!({
+            "symbolId": symbol_id,
+            "orderPattern": order_pattern,
+            "orderId": order_id,
+            "orderType": order_type,
+            "price": price,
+            "amount": amount,
+        });
+        if let Some(lp) = ifd_close_limit_price { body["ifdCloseLimitPrice"] = serde_json::json!(lp); }
+        if let Some(sp) = ifd_close_stop_price { body["ifdCloseStopPrice"] = serde_json::json!(sp); }
 
         let body_str = body.to_string();
         self.private_put("/api/v1/cfd/order", &body_str).await

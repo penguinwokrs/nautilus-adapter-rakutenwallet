@@ -188,6 +188,33 @@ pub struct SymbolInfo {
     #[serde(rename = "takerFeeRate")]
     #[serde(default)]
     pub taker_fee_rate: Option<String>,
+    #[pyo3(get)]
+    #[serde(rename = "baseCurrency")]
+    #[serde(default)]
+    pub base_currency: Option<String>,
+    #[pyo3(get)]
+    #[serde(rename = "quoteCurrency")]
+    #[serde(default)]
+    pub quote_currency: Option<String>,
+    #[pyo3(get)]
+    #[serde(rename = "baseScale")]
+    #[serde(default)]
+    pub base_scale: Option<i32>,
+    #[pyo3(get)]
+    #[serde(rename = "quoteScale")]
+    #[serde(default)]
+    pub quote_scale: Option<i32>,
+    #[pyo3(get)]
+    #[serde(rename = "closeOnly")]
+    #[serde(default)]
+    pub close_only: Option<bool>,
+    #[pyo3(get)]
+    #[serde(rename = "viewOnly")]
+    #[serde(default)]
+    pub view_only: Option<bool>,
+    #[pyo3(get)]
+    #[serde(default)]
+    pub enabled: Option<bool>,
 }
 
 #[pymethods]
@@ -205,6 +232,13 @@ impl SymbolInfo {
             max_leverage: None,
             maker_fee_rate: None,
             taker_fee_rate: None,
+            base_currency: None,
+            quote_currency: None,
+            base_scale: None,
+            quote_scale: None,
+            close_only: None,
+            view_only: None,
+            enabled: None,
         }
     }
 }

@@ -92,7 +92,13 @@ class RakutenwDataClient(LiveMarketDataClient):
         self._logger.info(f"Subscribed to {len(instruments)} instruments")
 
     async def unsubscribe(self, instruments: List[Instrument]):
-        pass
+        for instrument in instruments:
+            symbol_id = str(instrument.raw_symbol)
+            await self._rust_client.unsubscribe("TICKER", symbol_id)
+            await self._rust_client.unsubscribe("TRADES", symbol_id)
+            await self._rust_client.unsubscribe("ORDERBOOK", symbol_id)
+            self._subscribed_instruments.pop(symbol_id, None)
+        self._logger.info(f"Unsubscribed from {len(instruments)} instruments")
 
     def _handle_rust_data(self, *args):
         """
@@ -269,8 +275,11 @@ class RakutenwDataClient(LiveMarketDataClient):
         else:
             self._logger.error(f"Could not find instrument {instrument_id}")
 
-    async def _unsubscribe_quote_ticks(self, instrument_id):
-        pass
+    async def _unsubscribe_quote_ticks(self, command):
+        instrument_id = command.instrument_id if hasattr(command, 'instrument_id') else command
+        symbol_id = self._symbol_id_map.get(instrument_id.symbol.value)
+        if symbol_id:
+            await self._rust_client.unsubscribe("TICKER", symbol_id)
 
     async def _subscribe_trade_ticks(self, command):
         instrument_id = command.instrument_id if hasattr(command, 'instrument_id') else command
@@ -283,8 +292,11 @@ class RakutenwDataClient(LiveMarketDataClient):
         else:
             self._logger.error(f"Could not find instrument {instrument_id}")
 
-    async def _unsubscribe_trade_ticks(self, instrument_id):
-        pass
+    async def _unsubscribe_trade_ticks(self, command):
+        instrument_id = command.instrument_id if hasattr(command, 'instrument_id') else command
+        symbol_id = self._symbol_id_map.get(instrument_id.symbol.value)
+        if symbol_id:
+            await self._rust_client.unsubscribe("TRADES", symbol_id)
 
     async def _subscribe_order_book_deltas(self, command):
         instrument_id = command.instrument_id if hasattr(command, 'instrument_id') else command
@@ -297,8 +309,11 @@ class RakutenwDataClient(LiveMarketDataClient):
         else:
             self._logger.error(f"Could not find instrument {instrument_id}")
 
-    async def _unsubscribe_order_book_deltas(self, instrument_id):
-        pass
+    async def _unsubscribe_order_book_deltas(self, command):
+        instrument_id = command.instrument_id if hasattr(command, 'instrument_id') else command
+        symbol_id = self._symbol_id_map.get(instrument_id.symbol.value)
+        if symbol_id:
+            await self._rust_client.unsubscribe("ORDERBOOK", symbol_id)
 
     async def _subscribe_order_book_snapshots(self, instrument_id):
         pass

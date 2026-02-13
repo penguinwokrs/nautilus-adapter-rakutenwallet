@@ -130,12 +130,22 @@ class TestRakutenwAsset:
 class TestRakutenwEquityData:
     def test_creation(self):
         equity = RakutenwEquityData(
-            floating_pnl=Decimal("-500"),
+            floating_profit=Decimal("-500"),
+            floating_position_fee=Decimal("-100"),
+            remaining_floating_position_fee=Decimal("-50"),
+            floating_trade_fee=Decimal("-200"),
+            floating_profit_all=Decimal("-850"),
+            used_margin=Decimal("100000"),
+            necessary_margin=Decimal("100000"),
+            balance=Decimal("1000000"),
+            equity=Decimal("999150"),
+            margin_maintenance_percent=Decimal("999"),
             usable_amount=Decimal("800000"),
             withdrawable_amount=Decimal("700000"),
-            required_margin_amount=Decimal("100000"),
-            order_margin_amount=Decimal("50000"),
-            maintenance_rate=Decimal("500"),
+            withdrawal_amount_reserved=Decimal("0"),
         )
         assert equity.usable_amount == Decimal("800000")
-        assert equity.required_margin_amount == Decimal("100000")
+        assert equity.used_margin == Decimal("100000")
+        assert equity.balance == Decimal("1000000")
+        assert equity.equity == Decimal("999150")
+        assert equity.floating_profit_all == Decimal("-850")

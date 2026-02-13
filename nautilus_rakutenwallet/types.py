@@ -114,9 +114,16 @@ class RakutenwAsset:
 
 @dataclass
 class RakutenwEquityData:
-    floating_pnl: Optional[Decimal]
+    floating_profit: Optional[Decimal]
+    floating_position_fee: Optional[Decimal]
+    remaining_floating_position_fee: Optional[Decimal]
+    floating_trade_fee: Optional[Decimal]
+    floating_profit_all: Optional[Decimal]
+    used_margin: Optional[Decimal]
+    necessary_margin: Optional[Decimal]
+    balance: Optional[Decimal]
+    equity: Optional[Decimal]
+    margin_maintenance_percent: Optional[Decimal]
     usable_amount: Optional[Decimal]
     withdrawable_amount: Optional[Decimal]
-    required_margin_amount: Optional[Decimal]
-    order_margin_amount: Optional[Decimal]
-    maintenance_rate: Optional[Decimal]
+    withdrawal_amount_reserved: Optional[Decimal]

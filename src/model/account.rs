@@ -16,22 +16,43 @@ pub struct Asset {
 /// Equity data (margin info) from GET /api/v1/cfd/equitydata
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct EquityData {
-    #[serde(rename = "floatingPnl")]
+    #[serde(rename = "floatingProfit")]
     #[serde(default)]
-    pub floating_pnl: Option<String>,
-    #[serde(rename = "maintenanceRate")]
+    pub floating_profit: Option<String>,
+    #[serde(rename = "floatingPositionFee")]
     #[serde(default)]
-    pub maintenance_rate: Option<String>,
+    pub floating_position_fee: Option<String>,
+    #[serde(rename = "remainingFloatingPositionFee")]
+    #[serde(default)]
+    pub remaining_floating_position_fee: Option<String>,
+    #[serde(rename = "floatingTradeFee")]
+    #[serde(default)]
+    pub floating_trade_fee: Option<String>,
+    #[serde(rename = "floatingProfitAll")]
+    #[serde(default)]
+    pub floating_profit_all: Option<String>,
+    #[serde(rename = "usedMargin")]
+    #[serde(default)]
+    pub used_margin: Option<String>,
+    #[serde(rename = "necessaryMargin")]
+    #[serde(default)]
+    pub necessary_margin: Option<String>,
+    #[serde(rename = "balance")]
+    #[serde(default)]
+    pub balance: Option<String>,
+    #[serde(rename = "equity")]
+    #[serde(default)]
+    pub equity: Option<String>,
+    #[serde(rename = "marginMaintenancePercent")]
+    #[serde(default)]
+    pub margin_maintenance_percent: Option<String>,
     #[serde(rename = "usableAmount")]
     #[serde(default)]
     pub usable_amount: Option<String>,
     #[serde(rename = "withdrawableAmount")]
     #[serde(default)]
     pub withdrawable_amount: Option<String>,
-    #[serde(rename = "requiredMarginAmount")]
+    #[serde(rename = "withdrawalAmountReserved")]
     #[serde(default)]
-    pub required_margin_amount: Option<String>,
-    #[serde(rename = "orderMarginAmount")]
-    #[serde(default)]
-    pub order_margin_amount: Option<String>,
+    pub withdrawal_amount_reserved: Option<String>,
 }

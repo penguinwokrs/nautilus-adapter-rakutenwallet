@@ -85,11 +85,12 @@ impl RakutenwExecutionClient {
 
     // ========== Order Operations (Python) ==========
 
-    #[pyo3(signature = (symbol_id, order_behavior, order_side, order_type, amount, client_order_id, price=None, leverage=None, close_behavior=None, post_only=None))]
+    #[pyo3(signature = (symbol_id, order_pattern, order_behavior, order_side, order_type, amount, client_order_id, price=None, leverage=None, close_behavior=None, post_only=None, order_expire=None, position_id=None, ifd_close_limit_price=None, ifd_close_stop_price=None, oco_order_type_1=None, oco_price_1=None, oco_order_type_2=None, oco_price_2=None))]
     pub fn submit_order<'py>(
         &self,
         py: Python<'py>,
         symbol_id: String,
+        order_pattern: String,
         order_behavior: String,
         order_side: String,
         order_type: String,
@@ -99,18 +100,29 @@ impl RakutenwExecutionClient {
         leverage: Option<String>,
         close_behavior: Option<String>,
         post_only: Option<bool>,
+        order_expire: Option<String>,
+        position_id: Option<String>,
+        ifd_close_limit_price: Option<String>,
+        ifd_close_stop_price: Option<String>,
+        oco_order_type_1: Option<String>,
+        oco_price_1: Option<String>,
+        oco_order_type_2: Option<String>,
+        oco_price_2: Option<String>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let rest_client = self.rest_client.clone();
         let client_oid_map = self.client_oid_map.clone();
         let tracked_orders = self.tracked_orders.clone();
 
         let future = async move {
-            let price_ref = price.as_deref();
-            let lev_ref = leverage.as_deref();
-            let cb_ref = close_behavior.as_deref();
-
             let res = rest_client
-                .submit_order(&symbol_id, &order_behavior, &order_side, &order_type, &amount, price_ref, lev_ref, cb_ref, post_only)
+                .submit_order(
+                    &symbol_id, &order_pattern, &order_behavior, &order_side, &order_type, &amount,
+                    price.as_deref(), leverage.as_deref(), close_behavior.as_deref(), post_only,
+                    order_expire.as_deref(), position_id.as_deref(),
+                    ifd_close_limit_price.as_deref(), ifd_close_stop_price.as_deref(),
+                    oco_order_type_1.as_deref(), oco_price_1.as_deref(),
+                    oco_order_type_2.as_deref(), oco_price_2.as_deref(),
+                )
                 .await
                 .map_err(PyErr::from)?;
 
@@ -155,19 +167,25 @@ impl RakutenwExecutionClient {
         pyo3_async_runtimes::tokio::future_into_py(py, future)
     }
 
-    #[pyo3(signature = (order_id, price=None, amount=None))]
+    #[pyo3(signature = (symbol_id, order_pattern, order_id, order_type, price, amount, ifd_close_limit_price=None, ifd_close_stop_price=None))]
     pub fn modify_order<'py>(
         &self,
         py: Python<'py>,
+        symbol_id: String,
+        order_pattern: String,
         order_id: String,
-        price: Option<String>,
-        amount: Option<String>,
+        order_type: String,
+        price: String,
+        amount: String,
+        ifd_close_limit_price: Option<String>,
+        ifd_close_stop_price: Option<String>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let rest_client = self.rest_client.clone();
         let future = async move {
-            let price_ref = price.as_deref();
-            let amount_ref = amount.as_deref();
-            let res = rest_client.modify_order(&order_id, price_ref, amount_ref).await.map_err(PyErr::from)?;
+            let res = rest_client.modify_order(
+                &symbol_id, &order_pattern, &order_id, &order_type, &price, &amount,
+                ifd_close_limit_price.as_deref(), ifd_close_stop_price.as_deref(),
+            ).await.map_err(PyErr::from)?;
             serde_json::to_string(&res)
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))
         };
@@ -222,6 +240,16 @@ impl RakutenwExecutionClient {
 
     pub fn get_equity_data_py<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         self.rest_client.get_equity_data_py(py)
+    }
+
+    /// Stop the polling loop gracefully
+    pub fn disconnect<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let shutdown = self.shutdown.clone();
+        let future = async move {
+            shutdown.store(true, Ordering::SeqCst);
+            Ok("Disconnected")
+        };
+        pyo3_async_runtimes::tokio::future_into_py(py, future)
     }
 
     /// Track an order for polling
