@@ -1,0 +1,23 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "nautilus-adapter-rakutenwallet"
+version = "0.1.0"
+description = "Rakuten Wallet adapter for NautilusTrader"
+requires-python = ">=3.12"
+license = { text = "GPL-3.0-or-later" }
+dependencies = [
+    "nautilus-trader>=1.222.0",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: tests that make real HTTP requests to Rakuten Wallet API",
+]
+
+[tool.maturin]
+python-source = "."
+module-name = "nautilus_rakutenwallet._nautilus_rakutenwallet"
+features = ["pyo3/extension-module"]
