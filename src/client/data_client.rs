@@ -106,6 +106,30 @@ impl RakutenwDataClient {
         pyo3_async_runtimes::tokio::future_into_py(py, future)
     }
 
+    /// Unsubscribe from a channel for a symbol_id.
+    pub fn unsubscribe<'py>(&self, py: Python<'py>, channel: String, symbol_id: String) -> PyResult<Bound<'py, PyAny>> {
+        let subs_arc = self.subscriptions.clone();
+        let outgoing_arc = self.outgoing.clone();
+        let connected = self.connected.clone();
+
+        let future = async move {
+            {
+                let mut subs = subs_arc.lock().unwrap();
+                subs.remove(&(channel.clone(), symbol_id.clone()));
+            }
+
+            if connected.load(Ordering::SeqCst) {
+                let msg = Self::build_unsubscribe_msg(&channel, &symbol_id);
+                let mut queue = outgoing_arc.lock().unwrap();
+                queue.push(msg);
+            }
+
+            Ok("Unsubscribe command stored")
+        };
+
+        pyo3_async_runtimes::tokio::future_into_py(py, future)
+    }
+
     pub fn disconnect<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let shutdown = self.shutdown.clone();
         let future = async move {
@@ -272,7 +296,10 @@ impl RakutenwDataClient {
             }
 
             if shutdown.load(Ordering::SeqCst) { return; }
-            sleep(Duration::from_secs(backoff_sec)).await;
+            // Add jitter (±25%) to prevent thundering herd on reconnects
+            let jitter_factor = 0.75 + (rand::random::<f64>() * 0.5); // 0.75 to 1.25
+            let jittered = (backoff_sec as f64 * jitter_factor) as u64;
+            sleep(Duration::from_secs(jittered.max(1))).await;
             backoff_sec = (backoff_sec * 2).min(max_backoff);
         }
     }

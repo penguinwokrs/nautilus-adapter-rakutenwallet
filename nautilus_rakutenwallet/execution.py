@@ -86,6 +86,9 @@ class RakutenwExecutionClient(LiveExecutionClient):
         return self._account_id
 
     async def _connect(self):
+        if not self.config.api_key or not self.config.api_secret:
+            raise ValueError("RakutenwExecutionClient requires api_key and api_secret to connect")
+
         # Register all currencies
         await self._register_all_currencies()
 
@@ -108,6 +111,7 @@ class RakutenwExecutionClient(LiveExecutionClient):
             self.log.error(f"Failed to connect: {e}")
 
     async def _disconnect(self):
+        await self._rust_client.disconnect()
         self.log.info("RakutenwExecutionClient disconnected")
 
     def submit_order(self, command: SubmitOrder) -> None:
@@ -137,11 +141,27 @@ class RakutenwExecutionClient(LiveExecutionClient):
             elif order.order_type != OrderType.MARKET:
                 return  # Unsupported
 
-            # Default to OPEN behavior
+            # Defaults
+            order_pattern = "NORMAL"
             order_behavior = "OPEN"
             leverage = None
             close_behavior = None
             post_only = None
+            order_expire = None
+            position_id = None
+            ifd_close_limit_price = None
+            ifd_close_stop_price = None
+            oco_order_type_1 = None
+            oco_price_1 = None
+            oco_order_type_2 = None
+            oco_price_2 = None
+
+            # Map NautilusTrader TimeInForce -> Rakuten Wallet orderExpire
+            if hasattr(order, 'time_in_force'):
+                if order.time_in_force == TimeInForce.GTC:
+                    order_expire = "GTC"
+                elif order.time_in_force == TimeInForce.DAY:
+                    order_expire = "DAY"
 
             # Check for post_only
             if hasattr(order, 'is_post_only') and order.is_post_only:
@@ -153,17 +173,36 @@ class RakutenwExecutionClient(LiveExecutionClient):
                     tag_str = str(tag)
                     if tag_str.startswith("orderBehavior="):
                         order_behavior = tag_str.split("=", 1)[1]
+                    elif tag_str.startswith("orderPattern="):
+                        order_pattern = tag_str.split("=", 1)[1]
                     elif tag_str.startswith("leverage="):
                         leverage = tag_str.split("=", 1)[1]
                     elif tag_str.startswith("closeBehavior="):
                         close_behavior = tag_str.split("=", 1)[1]
+                    elif tag_str.startswith("positionId="):
+                        position_id = tag_str.split("=", 1)[1]
+                    elif tag_str.startswith("ifdCloseLimitPrice="):
+                        ifd_close_limit_price = tag_str.split("=", 1)[1]
+                    elif tag_str.startswith("ifdCloseStopPrice="):
+                        ifd_close_stop_price = tag_str.split("=", 1)[1]
+                    elif tag_str.startswith("ocoOrderType1="):
+                        oco_order_type_1 = tag_str.split("=", 1)[1]
+                    elif tag_str.startswith("ocoPrice1="):
+                        oco_price_1 = tag_str.split("=", 1)[1]
+                    elif tag_str.startswith("ocoOrderType2="):
+                        oco_order_type_2 = tag_str.split("=", 1)[1]
+                    elif tag_str.startswith("ocoPrice2="):
+                        oco_price_2 = tag_str.split("=", 1)[1]
 
             amount = str(order.quantity)
             client_id = str(order.client_order_id)
 
             resp_json = await self._rust_client.submit_order(
-                symbol_id, order_behavior, side, order_type, amount, client_id,
+                symbol_id, order_pattern, order_behavior, side, order_type, amount, client_id,
                 price, leverage, close_behavior, post_only,
+                order_expire, position_id,
+                ifd_close_limit_price, ifd_close_stop_price,
+                oco_order_type_1, oco_price_1, oco_order_type_2, oco_price_2,
             )
 
             resp = json.loads(resp_json)
@@ -179,6 +218,13 @@ class RakutenwExecutionClient(LiveExecutionClient):
 
         except Exception as e:
             self._logger.error(f"Submit failed: {e}")
+            self.generate_order_rejected(
+                strategy_id=order.strategy_id,
+                instrument_id=order.instrument_id,
+                client_order_id=order.client_order_id,
+                reason=str(e),
+                ts_event=self._clock.timestamp_ns(),
+            )
 
     def cancel_order(self, command: CancelOrder) -> None:
         self.create_task(self._cancel_order(command))
@@ -210,6 +256,14 @@ class RakutenwExecutionClient(LiveExecutionClient):
 
         except Exception as e:
             self._logger.error(f"Cancel failed: {e}")
+            self.generate_order_cancel_rejected(
+                strategy_id=command.strategy_id,
+                instrument_id=command.instrument_id,
+                client_order_id=command.client_order_id,
+                venue_order_id=command.venue_order_id,
+                reason=str(e),
+                ts_event=self._clock.timestamp_ns(),
+            )
 
     def modify_order(self, command: ModifyOrder) -> None:
         self.create_task(self._modify_order(command))
@@ -220,12 +274,41 @@ class RakutenwExecutionClient(LiveExecutionClient):
                 self._logger.error("ModifyOrder requires venue_order_id")
                 return
 
+            instrument_id = command.instrument_id
+            instrument = self._instrument_provider.find(instrument_id)
+            if instrument is None and hasattr(self, '_cache'):
+                instrument = self._cache.instrument(instrument_id)
+
+            symbol_id = str(instrument.raw_symbol) if instrument else instrument_id.symbol.value
+
+            # Look up original order for required fields
+            order = self._cache.order(command.client_order_id) if command.client_order_id else None
+
+            # Determine order_type for the modify request (API requires LIMIT or STOP)
+            order_type = "LIMIT"
+            if order:
+                if order.order_type == OrderType.STOP_MARKET:
+                    order_type = "STOP"
+                elif order.order_type == OrderType.LIMIT:
+                    order_type = "LIMIT"
+
+            # Determine order_pattern from tags (default NORMAL)
+            order_pattern = "NORMAL"
+            if order and hasattr(order, 'tags') and order.tags:
+                for tag in order.tags:
+                    tag_str = str(tag)
+                    if tag_str.startswith("orderPattern="):
+                        order_pattern = tag_str.split("=", 1)[1]
+
             venue_order_id_str = str(command.venue_order_id)
-            new_price = str(command.price) if command.price else None
-            new_qty = str(command.quantity) if command.quantity else None
+            new_price = str(command.price) if command.price else str(order.price) if order else "0"
+            new_qty = str(command.quantity) if command.quantity else str(order.quantity) if order else "0"
 
             await self._rust_client.modify_order(
+                symbol_id,
+                order_pattern,
                 venue_order_id_str,
+                order_type,
                 new_price,
                 new_qty,
             )
@@ -243,6 +326,14 @@ class RakutenwExecutionClient(LiveExecutionClient):
 
         except Exception as e:
             self._logger.error(f"Modify failed: {e}")
+            self.generate_order_modify_rejected(
+                strategy_id=command.strategy_id,
+                instrument_id=command.instrument_id,
+                client_order_id=command.client_order_id,
+                venue_order_id=command.venue_order_id,
+                reason=str(e),
+                ts_event=self._clock.timestamp_ns(),
+            )
 
     def _handle_poll_message(self, event_type: str, message: str):
         """Handle incoming order poll message from Rust client."""
@@ -337,6 +428,10 @@ class RakutenwExecutionClient(LiveExecutionClient):
                     )
         except Exception as e:
             self._logger.error(f"Error processing order completion: {e}")
+        finally:
+            # Clean up _order_states to prevent memory leak
+            oid_str = str(venue_order_id)
+            self._order_states.pop(oid_str, None)
 
     async def _process_order_update_from_data(self, venue_order_id: VenueOrderId, data: dict):
         client_oid = None
@@ -435,21 +530,31 @@ class RakutenwExecutionClient(LiveExecutionClient):
                     amount = Decimal(order_data.get("amount", "0"))
                     executed_amount = Decimal(order_data.get("executedAmount", "0") or "0")
 
-                    price_str = order_data.get("price")
-                    price = Price(Decimal(price_str), precision=0) if price_str else None
-
                     # Build instrument_id from symbolId
                     symbol_id = order_data.get("symbolId", "")
                     from nautilus_trader.model.identifiers import InstrumentId, Symbol
                     # Try to find instrument by raw_symbol
                     inst_id = instrument_id
+                    instrument = None
                     if not inst_id:
                         for iid, inst in self._instrument_provider.get_all().items() if hasattr(self._instrument_provider.get_all(), 'items') else []:
                             if str(inst.raw_symbol) == str(symbol_id):
                                 inst_id = iid
+                                instrument = inst
                                 break
                         if not inst_id:
                             inst_id = InstrumentId(Symbol(f"{symbol_id}"), Venue("RAKUTENW"))
+                    if instrument is None:
+                        instrument = self._instrument_provider.find(inst_id)
+                    if instrument is None and hasattr(self, '_cache'):
+                        instrument = self._cache.instrument(inst_id)
+
+                    # Use instrument precision if available, fallback to defaults
+                    size_precision = instrument.size_precision if instrument else 8
+                    price_precision = instrument.price_precision if instrument else 0
+
+                    price_str = order_data.get("price")
+                    price = Price(Decimal(price_str), precision=price_precision) if price_str else None
 
                     ts_now = self._clock.timestamp_ns()
 
@@ -461,8 +566,8 @@ class RakutenwExecutionClient(LiveExecutionClient):
                         order_type=order_type,
                         time_in_force=TimeInForce.GTC,
                         order_status=order_status,
-                        quantity=Quantity(amount, precision=8),
-                        filled_qty=Quantity(executed_amount, precision=8),
+                        quantity=Quantity(amount, precision=size_precision),
+                        filled_qty=Quantity(executed_amount, precision=size_precision),
                         report_id=UUID4(),
                         ts_accepted=ts_now,
                         ts_last=ts_now,
@@ -488,18 +593,38 @@ class RakutenwExecutionClient(LiveExecutionClient):
 
             equity_data = json.loads(equity_json)
 
+            # Use API field names directly (camelCase from JSON)
             usable_amount = Decimal(equity_data.get("usableAmount", "0") or "0")
-            required_margin = Decimal(equity_data.get("requiredMarginAmount", "0") or "0")
-            order_margin = Decimal(equity_data.get("orderMarginAmount", "0") or "0")
+            used_margin = Decimal(equity_data.get("usedMargin", "0") or "0")
+            necessary_margin = Decimal(equity_data.get("necessaryMargin", "0") or "0")
+            balance_val = Decimal(equity_data.get("balance", "0") or "0")
+            equity_val = Decimal(equity_data.get("equity", "0") or "0")
 
-            total = usable_amount + required_margin + order_margin
-            locked = required_margin + order_margin
+            # total = equity (all assets including unrealized PnL), locked = usedMargin
+            # Fallback if equity/balance not available
+            if equity_val > 0:
+                total = equity_val
+            elif balance_val > 0:
+                total = balance_val
+            else:
+                total = usable_amount + used_margin
+
+            locked = used_margin if used_margin > 0 else necessary_margin
 
             balance = AccountBalance(
                 Money(total, JPY),
                 Money(locked, JPY),
                 Money(usable_amount, JPY),
             )
+
+            # Pass all equity fields as info for downstream consumers
+            info = {}
+            for key in ("floatingProfit", "floatingPositionFee", "remainingFloatingPositionFee",
+                         "floatingTradeFee", "floatingProfitAll", "balance", "equity",
+                         "marginMaintenancePercent", "withdrawableAmount", "withdrawalAmountReserved"):
+                val = equity_data.get(key)
+                if val is not None:
+                    info[key] = str(val)
 
             account_state = AccountState(
                 self._account_id,
@@ -508,7 +633,7 @@ class RakutenwExecutionClient(LiveExecutionClient):
                 True,
                 [balance],
                 [],
-                {},
+                info,
                 UUID4(),
                 self._clock.timestamp_ns(),
                 self._clock.timestamp_ns(),

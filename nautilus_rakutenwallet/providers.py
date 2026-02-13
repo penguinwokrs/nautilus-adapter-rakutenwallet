@@ -108,6 +108,20 @@ class RakutenwInstrumentProvider(InstrumentProvider):
         if not symbol_id:
             return None
 
+        # Skip disabled, view-only, or close-only symbols
+        if symbol_info.get("enabled") is False:
+            if self._log_warnings:
+                self._log.warning(f"Skipping disabled symbol: {symbol_id}")
+            return None
+        if symbol_info.get("viewOnly") is True:
+            if self._log_warnings:
+                self._log.warning(f"Skipping view-only symbol: {symbol_id}")
+            return None
+        if symbol_info.get("closeOnly") is True:
+            if self._log_warnings:
+                self._log.warning(f"Skipping close-only symbol: {symbol_id}")
+            return None
+
         symbol_name = symbol_info.get("symbolName", symbol_id)
 
         # Parse symbol: e.g., "BTC_JPY" -> base="BTC", quote="JPY"
